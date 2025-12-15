@@ -29,11 +29,6 @@ Op1 :: enum (u8) {
   JMP, JZ, CALL, PUSHU
 }
 
-Fmt :: enum {
-  FMT0,
-  FMT1
-}
-
 Fmt0 :: bit_field u16 {
   simm: i16 | 9,
   i: bool   | 1,
