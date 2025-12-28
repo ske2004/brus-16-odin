@@ -1,0 +1,51 @@
+import "std.um"
+
+type (
+  ROM* = struct {
+    code: []uint16
+    data: []uint16
+  }
+
+  Op0* = enum {
+    ADD;  SUB;  MUL;     AND
+    OR;   XOR;  SHL;     SHR
+    SHRA; EQ;   NEQ;     LT
+    LE;   GT;   GE;      LTU
+    LOAD; STORE;LOCALS;  SET_FP
+    RET;  PUSH; PUSH_MR; WAIT
+  }
+
+  Op1* = enum {
+    JMP; JZ; CALL; PUSHU
+  }
+)
+
+op0_names* := []str{
+  "ADD",     "SUB",   "MUL",         "AND",
+  "OR",      "XOR",   "SHL",         "SHR",
+  "SHRA",    "EQ",    "NEQ",         "LT",
+  "LE",      "GT",    "GE",          "LTU",
+  "LOAD",    "STORE", "LOCALS",      "SET_FP",
+  "RET",     "PUSH",  "PUSH_MR",     "WAIT",
+}
+
+op1_names* := []str{
+  "JMP",     "JZ",    "CALL",        "PUSHU"
+}
+
+
+fn writeRom*(file: std::File, rom: ROM): std::Err {
+  n, err := std::fwrite(file, uint16(len(rom.code)))
+  if err.code != 0 { return err }
+  n, err = std::fwrite(file, uint16(len(rom.data)))
+  if err.code != 0 { return err }
+  for i, word in rom.code {
+    n, err = std::fwrite(file, word)
+    if err.code != 0 { return err }
+  } 
+  for i, word in rom.data {
+    n, err = std::fwrite(file, word)
+    if err.code != 0 { return err }
+  }
+  return {}
+}

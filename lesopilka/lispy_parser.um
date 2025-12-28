@@ -1,0 +1,185 @@
+import (
+  "std.um"
+)
+
+type Iter = struct {
+  pos, line, column: int
+  src: str
+}
+
+fn isSpace(c: char): bool {
+  return c == ' ' || c == '\n' || c == '\r' || c == '\t'
+}
+
+fn isDigit10(c: char): bool {
+  return c >= '0' && c <= '9'
+}
+
+fn isDigit16(c: char): bool {
+  return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+}
+
+fn isAlpha(c: char): bool {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+fn isIdent(c: char): bool {
+  return isDigit10(c) || isAlpha(c) || c == '_' || c == '.' || c == '-'
+}
+
+// assume valid input
+fn toDigitVal(c: char): int {
+  return isDigit10(c) ? int(c)-int('0') : (int(c)&7)+9
+}
+
+fn (iter: ^Iter) get(at: int = 0): char {
+  return iter.pos < len(iter.src) ? iter.src[iter.pos] : '\0'
+}
+
+fn (iter: ^Iter) next(at: int = 0) {
+  switch iter.get() {
+  case '\n':
+    iter.pos += 1
+    iter.column = 0
+    iter.line += 1
+  case '\0':
+  default:
+    iter.pos += 1
+    iter.column += 1
+  }
+}
+
+fn (iter: ^Iter) eof(): bool {
+  return iter.get() == '\0'
+}
+
+fn (iter: ^Iter) skipWhitespace(): bool {
+  if isSpace(iter.get()) {
+    iter.next()
+    return true
+  }
+  return false
+}
+
+fn (iter: ^Iter) skipComment(): bool {
+  if iter.get() == ';' {
+    for !iter.eof() && iter.get() != '\n' {
+      iter.next()
+    }
+    return true
+  }
+  return false
+}
+
+fn (iter: ^Iter) skipJunk() {
+  for iter.skipWhitespace() || iter.skipComment() {
+    /* ... */
+  }
+}
+
+fn parseRec(iter: ^Iter): (any, std::Err) {
+  iter.skipJunk()
+
+  if iter.eof() {
+    return null, std::error(1, "unexpected eof", iter^)
+  }
+
+  switch iter.get() {
+  case '(':
+    result := []any{}
+
+    iter.next()
+    iter.skipJunk()
+
+    for iter.get() != ')' {
+      value, err := parseRec(iter)
+      if err.code != 0 {
+        return null, err
+      }
+      result = append(result, value)
+      iter.skipJunk()
+    }
+    iter.next()
+
+    return result, {}
+  case '-', '+', '#', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9': 
+    numval := 0
+    sign := 1
+    if iter.get() == '-' {
+      iter.next()
+      sign = -1
+    } else if iter.get() == '+' {
+      iter.next()
+    }
+
+    if iter.get() == '#' {
+      iter.next()
+      if iter.get() != 'x' {
+        return null, std::error(1, "i'm expecting `x` after `#` (for hex literal)", iter^)
+      }
+      iter.next()
+      if !isDigit16(iter.get()) {
+        return null, std::error(1, "i need at least one digit for hex literal", iter^)
+      }
+      for isDigit16(iter.get()) {
+        numval = numval * 16 + toDigitVal(iter.get())
+        iter.next()
+      }
+    } else {
+      for isDigit10(iter.get()) {
+        numval = numval * 10 + toDigitVal(iter.get())
+        iter.next()
+      }
+    }
+    return numval*sign, {}
+  }
+
+  if !isIdent(iter.get()) {
+    return null, std::error(1, "unexpected character", iter^)
+  }
+
+  ident := ""
+  for isIdent(iter.get()) {
+    ident += iter.get()
+    iter.next()
+  }
+  return ident, {}
+}
+
+fn parse*(src: str): (any, std::Err) {
+  iter := &Iter{
+    src: src,
+  }
+
+  terms := []any{}
+
+  for !iter.eof() {
+    term, err := parseRec(iter) 
+    if err.code != 0 {
+      return null, err
+    }
+
+    terms = append(terms, term)
+
+    iter.skipJunk()
+  }
+
+  return terms, {}
+}
+
+fn main*() {
+  result, err := parse(`
+    (add #xAA 42)
+    
+    3 3 452 345 234 -#x3
+    (mul (add 1 2)) ; example comment
+  `)
+
+  if err.code != 0 {
+    ctx := Iter(err.sender)
+
+    printf("ir syntax error: (%d:%d) %s", ctx.line, ctx.column, err.msg)
+  } else {
+    printf("%v", result)
+  }
+}

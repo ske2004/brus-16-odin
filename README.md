@@ -1,3 +1,9 @@
+todo: make this pretty >:p
+
+- emu: emulator in Odin
+- gui: emulator gui
+- lesopilka: BRUS-16 IR compiler
+- lackey: me (launch script)
 
 <img width=380 src="img.png" align=left></img>
 

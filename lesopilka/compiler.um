@@ -1,0 +1,149 @@
+import (
+  "std.um"
+  "types.um"
+  "lispy_parser.um"
+)
+
+type Token = int
+
+type Compiler* = struct {
+  rom: types::ROM
+}
+
+fn touint16(i: int): uint16 {
+  res := i
+  if i < 0 {
+    res = uint(~i)+32768
+  }
+  std::assert(res <= 0xFFFF, "out of range for u16")
+  return res
+}
+
+fn encode0(op: types::Op0): uint16 {
+  return uint(op) << 10
+}
+
+fn encode0i(op: types::Op0, simm: uint = 0): uint16 {
+  std::assert(simm < 512, sprintf("internal error: invalid simm value %v", simm))
+
+  return (uint(op) << 10) | (1 << 9) | (simm&0x1FF)
+}
+
+fn encode1(op: types::Op1, imm: uint): uint16 {
+  std::assert(imm <= 0x1FFF, sprintf("internal error: invalid imm value %v", imm))
+
+  return (1 << 15) | (uint(op) << 13) | (imm&0x1FFF)
+}
+
+fn (c: ^Compiler) emit(op: uint16) {
+  c.rom.code = append(c.rom.code, op)
+}
+
+fn (c: ^Compiler) emitLate(instr: types::Op1): Token {
+  c.emit(encode1(instr, 0))
+  return len(c.rom.code)-1
+}
+
+fn (c: ^Compiler) resolveLate(token: Token) {
+  c.rom.code[token] |= len(c.rom.code)
+}
+
+fn (c: ^Compiler) emitLoadSimmInstr(instr: types::Op0, val: uint16) {
+
+  // fits in to simm
+  if val & 0x1FF == val {
+    c.emit(encode0i(instr, val))
+    return
+  }
+
+  if val & 0x1FFF == val {
+    c.emit(encode1(.PUSHU, val))
+    if instr != .PUSH {
+      c.emit(encode0(instr))
+    }
+    return
+  }
+
+  c.emit(encode1(.PUSHU, (val>>3)&0x1FFF))
+  c.emit(encode0i(.SHL, 3))
+  c.emit(encode0i(.OR, val&7))
+  if instr != .PUSH {
+    c.emit(encode0(instr))
+  }
+}
+
+fn (c: ^Compiler) compile(tree: any)
+
+fn (c: ^Compiler) emitExpandInstr*(instr: types::Op0, tree: any) {
+  if val := ^int(tree); val != null {
+    c.emitLoadSimmInstr(instr, touint16(val^))
+  } else {
+    c.compile(tree)
+    if instr != .PUSH {
+      c.emit(encode0(instr))
+    }
+  }
+}
+
+fn (c: ^Compiler) compile(tree: any) {
+  switch t := type(tree) {
+  case []any:
+    if ^[]any(t[0]) != null {
+      for i, instr in t  {
+        c.compile(instr)
+      }
+    } else {
+      func := str(t[0])
+      if func == "add" {
+        c.emitExpandInstr(.PUSH, t[1])
+        c.emitExpandInstr(.ADD, t[2])
+      } else if func == "if" {
+        c.emitLoadSimmInstr(.PUSH, touint16(int(t[1])))
+        if len(t) == 3 {
+          endToken := c.emitLate(.JZ)
+          c.compile(t[2])
+          c.resolveLate(endToken)
+        } else if len(t) == 4 {
+          elseToken := c.emitLate(.JZ)
+          c.compile(t[2])
+          endToken := c.emitLate(.JMP)
+          c.resolveLate(elseToken)
+          c.compile(t[3])
+          c.resolveLate(endToken)
+        } else {
+          std::assert(false, sprintf("invalid amount of if branches"))
+        }
+      } else if func == "peek" {
+        // TODO: optimize but the sign is in the way
+        c.emitExpandInstr(.PUSH, t[1])
+        c.emit(encode0(.LOAD))
+      }
+    } 
+
+  default: std::assert(false, sprintf("internal error: invalid leaf %v", tree))
+  }
+}
+
+fn main() {
+  compiler := Compiler{}
+
+  result, err := lispy_parser::parse(`
+    (if 0 (
+      (add (peek #x1000) 2)
+    ) (
+      (add 3 5)
+    ))
+  `)
+  std::exitif(err)
+  
+  compiler.compile(result)
+
+  compiler.rom.code = append(compiler.rom.code, []uint16{
+    encode0(.WAIT),
+    encode1(.JMP, 0)
+  })
+
+  file, err := std::fopen("out.bin", "wb")
+  std::exitif(err)
+  std::exitif(types::writeRom(file, compiler.rom))
+}
